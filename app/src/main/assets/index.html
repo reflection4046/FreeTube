@@ -3,68 +3,103 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-:root{color-scheme:light dark}
+:root{color-scheme:dark}
 body{margin:0;font-family:sans-serif;background:#111;color:#eee}
-#bar{display:flex;gap:6px;padding:8px;position:sticky;top:0;background:#111;z-index:2}
+#top{position:sticky;top:0;background:#111;z-index:2;padding:8px;border-bottom:1px solid #333}
+#bar{display:flex;gap:6px}
 #q{flex:1;padding:10px;border-radius:8px;border:0;font-size:16px}
 button{padding:10px 14px;border:0;border-radius:8px;background:#e53935;color:#fff;font-size:16px}
-#pw{position:relative;width:100%;padding-top:56.25%;background:#000;display:none}
-#pw>div,#pw iframe{position:absolute;inset:0;width:100%;height:100%}
+#now{display:none;margin-top:8px}
+#pw{width:100%;height:200px;background:#000;border-radius:8px;overflow:hidden}
+#pw iframe{width:100%;height:100%}
+#title{font-size:14px;margin:6px 0 2px}
+#ctl{display:flex;gap:6px}
+#ctl button{background:#333;flex:1;padding:8px}
 .item{display:flex;gap:10px;padding:8px;align-items:center}
-.item img{width:140px;border-radius:6px}
+.item.cur{background:#2a2a2a}
+.item img{width:90px;height:90px;object-fit:cover;border-radius:6px}
 .item div{font-size:14px}
 .item small{color:#aaa}
-#msg{padding:12px;color:#ffab91}
+#msg{padding:10px;color:#ffab91;font-size:14px}
 </style></head><body>
-<div id="bar"><input id="q" placeholder="Search YouTube" enterkeyhint="search"><button id="go">Go</button><button id="key" style="background:#444">Key</button></div>
-<div id="pw"><div id="player"></div></div>
+<div id="top">
+  <div id="bar"><input id="q" placeholder="Search songs, artists" enterkeyhint="search"><button id="go">Go</button><button id="key" style="background:#444">Key</button></div>
+  <div id="now">
+    <div id="pw"><div id="player"></div></div>
+    <div id="title"></div>
+    <div id="ctl"><button id="prev">⏮ Prev</button><button id="next">Next ⏭</button></div>
+  </div>
+</div>
 <div id="msg"></div>
 <div id="list"></div>
 <script>
-// The API key is entered in the app and stored on this device only
 function getKey(){ try{ return localStorage.getItem("yt_key")||""; }catch(e){ return ""; } }
 function setKey(k){ try{ localStorage.setItem("yt_key", k); }catch(e){} }
 function askKey(){
   const k = prompt("Enter your YouTube Data API v3 key (starts with AIza):", getKey());
-  if(k && k.trim()){ setKey(k.trim()); document.getElementById("msg").textContent = "Key saved."; return true; }
+  if(k && k.trim()){ setKey(k.trim()); msg.textContent = "Key saved."; return true; }
   return false;
 }
-let player, pending;
+const msg = document.getElementById("msg"), list = document.getElementById("list");
+let player, ready = false, tracks = [], idx = -1;
+
 const tag = document.createElement("script");
 tag.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(tag);
-function onYouTubeIframeAPIReady(){ if(pending) play(pending); }
-function play(id){
-  document.getElementById("pw").style.display = "block";
-  if(!window.YT || !YT.Player){ pending = id; return; }
-  if(player){ player.loadVideoById(id); return; }
-  player = new YT.Player("player",{videoId:id,
-    playerVars:{playsinline:1,autoplay:1,origin:location.origin},
-    events:{onError:e=>{document.getElementById("msg").innerHTML =
-      "This video can't be played here. <a href='https://www.youtube.com/watch?v="+id+"'>Open in YouTube</a>";}}});
+function onYouTubeIframeAPIReady(){
+  ready = true;
+  if(idx >= 0) play(idx);
 }
+function decode(s){ const t = document.createElement("textarea"); t.innerHTML = s; return t.value; }
+
+function play(i){
+  if(i < 0 || i >= tracks.length) return;
+  idx = i;
+  const t = tracks[i];
+  document.getElementById("now").style.display = "block";
+  document.getElementById("title").textContent = t.title;
+  [...list.children].forEach((el,n)=>el.classList.toggle("cur", n===i));
+  msg.textContent = "";
+  if(!ready) return;
+  if(player){ player.loadVideoById(t.id); return; }
+  player = new YT.Player("player",{
+    width:"100%", height:"200", videoId:t.id,
+    playerVars:{playsinline:1, autoplay:1, origin:location.origin},
+    events:{
+      onStateChange:e=>{ if(e.data === 0) play(idx+1); },
+      onError:()=>{
+        msg.innerHTML = "Can't play this one here. Skipping... <a href='https://www.youtube.com/watch?v="+tracks[idx].id+"'>Open in YouTube</a>";
+        setTimeout(()=>play(idx+1), 2500);
+      }
+    }
+  });
+}
+
 async function search(){
   const q = document.getElementById("q").value.trim(); if(!q) return;
-  const msg = document.getElementById("msg"), list = document.getElementById("list");
   msg.textContent = ""; list.innerHTML = "";
   if(!getKey() && !askKey()){ msg.textContent = "An API key is required to search."; return; }
   try{
-    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=20&q="+encodeURIComponent(q)+"&key="+encodeURIComponent(getKey()));
+    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&videoEmbeddable=true&maxResults=25&q="+encodeURIComponent(q)+"&key="+encodeURIComponent(getKey()));
     const j = await r.json();
     if(j.error){ msg.textContent = j.error.message + " (tap Key to change it)"; return; }
-    j.items.forEach(v=>{
+    tracks = j.items.map(v=>({id:v.id.videoId, title:decode(v.snippet.title), ch:decode(v.snippet.channelTitle), img:v.snippet.thumbnails.medium.url}));
+    if(!tracks.length){ msg.textContent = "No music results."; return; }
+    tracks.forEach((t,n)=>{
       const d = document.createElement("div"); d.className = "item";
-      const t = document.createElement("div");
-      const b = document.createElement("b"); b.textContent = v.snippet.title;
-      const s = document.createElement("small"); s.textContent = v.snippet.channelTitle;
-      t.append(b, document.createElement("br"), s);
-      const img = document.createElement("img"); img.src = v.snippet.thumbnails.medium.url;
-      d.append(img, t);
-      d.onclick = ()=>{ msg.textContent = ""; play(v.id.videoId); window.scrollTo(0,0); };
+      const img = document.createElement("img"); img.src = t.img;
+      const x = document.createElement("div");
+      const b = document.createElement("b"); b.textContent = t.title;
+      const s = document.createElement("small"); s.textContent = t.ch;
+      x.append(b, document.createElement("br"), s);
+      d.append(img, x);
+      d.onclick = ()=>play(n);
       list.appendChild(d);
     });
   }catch(e){ msg.textContent = "Network error"; }
 }
 document.getElementById("go").onclick = search;
 document.getElementById("key").onclick = askKey;
+document.getElementById("prev").onclick = ()=>play(idx-1);
+document.getElementById("next").onclick = ()=>play(idx+1);
 document.getElementById("q").addEventListener("keydown", e=>{ if(e.key==="Enter") search(); });
 </script></body></html>
