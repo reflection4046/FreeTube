@@ -16,13 +16,19 @@ button{padding:10px 14px;border:0;border-radius:8px;background:#e53935;color:#ff
 .item small{color:#aaa}
 #msg{padding:12px;color:#ffab91}
 </style></head><body>
-<div id="bar"><input id="q" placeholder="Search YouTube" enterkeyhint="search"><button id="go">Go</button></div>
+<div id="bar"><input id="q" placeholder="Search YouTube" enterkeyhint="search"><button id="go">Go</button><button id="key" style="background:#444">Key</button></div>
 <div id="pw"><div id="player"></div></div>
 <div id="msg"></div>
 <div id="list"></div>
 <script>
-// Paste your YouTube Data API v3 key here
-const API_KEY = "YOUR_API_KEY";
+// The API key is entered in the app and stored on this device only
+function getKey(){ try{ return localStorage.getItem("yt_key")||""; }catch(e){ return ""; } }
+function setKey(k){ try{ localStorage.setItem("yt_key", k); }catch(e){} }
+function askKey(){
+  const k = prompt("Enter your YouTube Data API v3 key (starts with AIza):", getKey());
+  if(k && k.trim()){ setKey(k.trim()); document.getElementById("msg").textContent = "Key saved."; return true; }
+  return false;
+}
 let player, pending;
 const tag = document.createElement("script");
 tag.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(tag);
@@ -40,10 +46,11 @@ async function search(){
   const q = document.getElementById("q").value.trim(); if(!q) return;
   const msg = document.getElementById("msg"), list = document.getElementById("list");
   msg.textContent = ""; list.innerHTML = "";
+  if(!getKey() && !askKey()){ msg.textContent = "An API key is required to search."; return; }
   try{
-    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=20&q="+encodeURIComponent(q)+"&key="+API_KEY);
+    const r = await fetch("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=20&q="+encodeURIComponent(q)+"&key="+encodeURIComponent(getKey()));
     const j = await r.json();
-    if(j.error){ msg.textContent = j.error.message; return; }
+    if(j.error){ msg.textContent = j.error.message + " (tap Key to change it)"; return; }
     j.items.forEach(v=>{
       const d = document.createElement("div"); d.className = "item";
       const t = document.createElement("div");
@@ -58,5 +65,6 @@ async function search(){
   }catch(e){ msg.textContent = "Network error"; }
 }
 document.getElementById("go").onclick = search;
+document.getElementById("key").onclick = askKey;
 document.getElementById("q").addEventListener("keydown", e=>{ if(e.key==="Enter") search(); });
 </script></body></html>
